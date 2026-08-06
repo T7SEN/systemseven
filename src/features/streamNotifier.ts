@@ -1,8 +1,9 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { Client, EmbedBuilder } from "discord.js";
+import { Client } from "discord.js";
 import type { Config } from "../config.js";
 import { TwitchClient, type TwitchStream, type TwitchUser } from "../lib/twitch.js";
+import { sendGoLiveMessage } from "./announcement.js";
 
 const STATE_FILE = path.join(process.cwd(), "data", "state.json");
 
@@ -165,42 +166,8 @@ export class StreamNotifier {
   }
 
   async #announce(stream: TwitchStream): Promise<void> {
-    const channel = await this.#client.channels.fetch(this.#config.announceChannelId);
-    if (!channel || !channel.isSendable()) {
-      throw new Error(
-        `Channel ${this.#config.announceChannelId} does not exist or the bot cannot send messages to it.`,
-      );
-    }
-
     const user = this.#users.get(stream.user_login.toLowerCase());
-    const url = `https://twitch.tv/${stream.user_login}`;
-    const displayName = user?.display_name ?? stream.user_name;
-    const thumbnail = stream.thumbnail_url
-      .replace("{width}", "1280")
-      .replace("{height}", "720");
-
-    const embed = new EmbedBuilder()
-      .setColor(0x9146ff)
-      .setAuthor({
-        name: `${displayName} is now live on Twitch!`,
-        iconURL: user?.profile_image_url,
-        url,
-      })
-      .setTitle(stream.title || "Untitled stream")
-      .setURL(url)
-      .setImage(`${thumbnail}?t=${Date.now()}`)
-      .setTimestamp(new Date(stream.started_at));
-
-    if (stream.game_name) {
-      embed.addFields({ name: "Playing", value: stream.game_name, inline: true });
-    }
-
-    const roleId = this.#config.mentionRoleId;
-    await channel.send({
-      content: roleId ? `<@&${roleId}> ${displayName} just went live: ${url}` : undefined,
-      embeds: [embed],
-      allowedMentions: roleId ? { roles: [roleId] } : { parse: [] },
-    });
+    await sendGoLiveMessage(this.#client, this.#config, stream, user);
   }
 
   async #loadState(): Promise<void> {

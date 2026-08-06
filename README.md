@@ -52,6 +52,19 @@ pnpm build
 pnpm start
 ```
 
+### 4. Verify the setup
+
+```bash
+pnpm check         # validates tokens, channel access, permissions — posts nothing
+pnpm test-notify   # posts a REAL test announcement (pings the role if configured)
+```
+
+`pnpm test-notify` exercises the exact code path a real go-live announcement
+takes, using your real Twitch profile and a synthetic stream (or the real one
+if you're live). To test the *detection* side end-to-end, temporarily set
+`TWITCH_BROADCASTERS` to any channel that is live right now, run `pnpm dev`,
+and watch the announcement arrive; then set it back.
+
 ## Behavior notes
 
 - Twitch is polled every `POLL_SECONDS` (default 60), so announcements arrive
