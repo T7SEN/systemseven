@@ -50,6 +50,6 @@ The pre-commit draft compared against `lastAnnouncedAt`, and review caught the f
 1. A stream id, once recorded, is never announced again.
 2. State is persisted before the poll cycle ends whenever it changed.
 3. Announce-failure leaves state untouched (retry semantics depend on it).
-4. Every live sighting refreshes `lastSeenLiveAt`.
+4. Every live sighting refreshes `lastSeenLiveAt` — except a sighting whose announcement fails, which records nothing (that's invariant 3; the stale timestamp just means a post-failure restart may announce instead of suppress, which is the safe direction).
 5. `#loadState` must accept arbitrary JSON without throwing.
 6. Changing `BroadcasterState`'s shape requires updating the `#loadState` sanitizer in the same change; existing state files must load.
