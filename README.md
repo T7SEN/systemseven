@@ -10,6 +10,7 @@ All-in-one Discord bot for your server. Current features:
 ## Requirements
 
 - Node.js 18.17 or newer
+- pnpm
 - A Discord server where you have permission to add bots
 
 ## Setup
@@ -35,8 +36,8 @@ All-in-one Discord bot for your server. Current features:
 
 ```bash
 cp .env.example .env   # then fill in the values
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 In Discord, enable Developer Mode (User Settings → Advanced) so you can
@@ -47,8 +48,8 @@ if you want a ping).
 For production, build once and run the compiled output:
 
 ```bash
-npm run build
-npm start
+pnpm build
+pnpm start
 ```
 
 ## Behavior notes

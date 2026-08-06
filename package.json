@@ -4,6 +4,7 @@
   "private": true,
   "description": "SystemSeven — all-in-one Discord bot",
   "type": "module",
+  "packageManager": "pnpm@11.3.0",
   "engines": {
     "node": ">=18.17"
   },
