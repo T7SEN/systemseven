@@ -199,6 +199,8 @@ export class StreamNotifier {
   async #saveState(): Promise<void> {
     try {
       await mkdir(path.dirname(STATE_FILE), { recursive: true });
+      // Write tmp + rename so a crash mid-write can never leave a truncated
+      // state file (a corrupt file would cost a duplicate announcement).
       const tmpFile = `${STATE_FILE}.tmp`;
       await writeFile(tmpFile, JSON.stringify(this.#state, null, 2), "utf8");
       await rename(tmpFile, STATE_FILE);
