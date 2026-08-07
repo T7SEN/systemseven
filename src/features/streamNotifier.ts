@@ -3,11 +3,13 @@ import { Client } from "discord.js";
 import type { Config } from "../config.js";
 import type { AnnouncementHistory } from "../lib/history.js";
 import { readJsonFile, writeJsonAtomic } from "../lib/jsonFile.js";
+import { createLogger } from "../lib/logger.js";
 import type { TwitchClient, TwitchStream, TwitchUser } from "../lib/twitch.js";
 import type { Watchlist } from "../lib/watchlist.js";
 import { sendGoLiveMessage } from "./announcement.js";
 
 const STATE_FILE = path.join(process.cwd(), "data", "state.json");
+const log = createLogger("notifier");
 
 interface BroadcasterState {
   /** Twitch stream id of the last stream we announced (or deliberately suppressed). */
@@ -67,12 +69,12 @@ export class StreamNotifier {
     } catch (error) {
       // Transient Twitch/network failure at boot gets the same treatment as any
       // later poll failure: log it and let the scheduled retry handle it.
-      console.error("[notifier] Initial poll failed (will retry on schedule):", error);
+      log.error("Initial poll failed (will retry on schedule)", error);
     }
     this.#scheduleNext();
     const logins = this.#watchlist.list();
-    console.log(
-      `[notifier] Watching ${logins.length > 0 ? logins.join(", ") : "nobody yet (/watch add)"} every ${this.#config.pollSeconds}s`,
+    log.info(
+      `Watching ${logins.length > 0 ? logins.join(", ") : "nobody yet (/watch add)"} every ${this.#config.pollSeconds}s`,
     );
   }
 
@@ -105,7 +107,7 @@ export class StreamNotifier {
       try {
         await this.#runPoll();
       } catch (error) {
-        console.error("[notifier] Poll failed:", error);
+        log.error("Poll failed", error);
       }
       this.#scheduleNext();
     }, this.#config.pollSeconds * 1000);
@@ -122,13 +124,11 @@ export class StreamNotifier {
       }
       const unknown = missing.filter((login) => !this.#users.has(login));
       if (unknown.length > 0) {
-        console.warn(
-          `[notifier] These Twitch logins were not found and will never trigger: ${unknown.join(", ")}`,
-        );
+        log.warn(`These Twitch logins were not found and will never trigger: ${unknown.join(", ")}`);
       }
     } catch (error) {
       // Announcements still work without user records, just with less detail.
-      console.warn("[notifier] Could not resolve Twitch users:", error);
+      log.warn("Could not resolve Twitch users", undefined, error);
     }
   }
 
@@ -162,7 +162,7 @@ export class StreamNotifier {
       const withinCooldown = cooldownMs > 0 && Date.now() - lastSeenLive < cooldownMs;
 
       if (withinCooldown) {
-        console.log(`[notifier] ${login} restarted stream within cooldown; not re-announcing.`);
+        log.info(`${login} restarted stream within cooldown; not re-announcing.`);
         state.lastStreamId = stream.id;
         state.lastSeenLiveAt = now;
       } else {
@@ -171,7 +171,7 @@ export class StreamNotifier {
           state.lastStreamId = stream.id;
           state.lastAnnouncedAt = now;
           state.lastSeenLiveAt = now;
-          console.log(`[notifier] Announced ${login} (stream ${stream.id})`);
+          log.info(`Announced ${login} (stream ${stream.id})`);
           const user = this.#users.get(login);
           await this.#history.append({
             streamId: stream.id,
@@ -184,7 +184,7 @@ export class StreamNotifier {
           });
         } catch (error) {
           // Leave lastStreamId untouched so the next poll retries the announcement.
-          console.error(`[notifier] Failed to announce ${login}:`, error);
+          log.error(`Failed to announce ${login}`, error);
           continue;
         }
       }
@@ -230,7 +230,7 @@ export class StreamNotifier {
     try {
       await writeJsonAtomic(STATE_FILE, this.#state);
     } catch (error) {
-      console.error("[notifier] Failed to save state:", error);
+      log.error("Failed to save state", error);
     }
   }
 }

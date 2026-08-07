@@ -12,7 +12,9 @@ No linter enforces this — consistency is maintained by matching the existing c
 
 ## Logging
 
-- Prefix by subsystem: `[bot]`, `[notifier]`, `[check]`, `[test]`. New features add their own prefix.
+- Bot code logs through `createLogger(subsystem)` from `src/lib/logger.ts`; the subsystem becomes the bracketed tag (`[bot]`, `[notifier]`, `[watchlist]`, `[history]`, `[commands]`). New features create their own at module top.
+- `check.ts` and `testNotify.ts` keep raw console — their output is the CLI UI, not bot logging.
+- Errors ride the dedicated parameter (`log.error("Poll failed", error)`), never string-interpolated into the message.
 - Log state transitions and failures, not routine success. One line per event.
 - Never log secrets or full config objects.
 

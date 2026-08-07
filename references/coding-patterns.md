@@ -49,7 +49,7 @@ export class MyFeature {
   #scheduleNext(): void {
     if (this.#stopped) return;
     this.#timer = setTimeout(async () => {
-      try { await this.#runPoll(); } catch (e) { console.error("[notifier] Poll failed:", e); }
+      try { await this.#runPoll(); } catch (e) { log.error("Poll failed", e); }
       this.#scheduleNext();
     }, this.#config.pollSeconds * 1000);
   }
@@ -68,6 +68,12 @@ export class MyFeature {
 - The only file that touches `process.env`. Pattern: `requireEnv` (throws with the fix in the message), `optionalNumber` (default + minimum clamp), normalize-then-validate for external identifiers.
 - Twitch logins: lowercase, strip `@` and `twitch.tv/` URL prefixes, then `/^[a-z0-9_]{1,25}$/` — because one malformed login makes Helix 400 the entire batched request.
 - Every var appears in `.env.example` with a comment stating what it is and its default.
+
+## Logging
+
+- `src/lib/logger.ts`: `createLogger(subsystem)` returns a leveled logger (`debug`/`info`/`warn`/`error`); the built-in console sink preserves the `[subsystem] message` format. One logger per module, created at module top.
+- External transports (Sentry etc.) attach via `addLogSink(sink)` at startup — feature code never imports a telemetry SDK directly. Sinks are exception-isolated: a broken sink can't take the bot down.
+- Raw `console.*` is reserved for `check.ts`/`testNotify.ts`, whose console output is the product.
 
 ## HTTP / external APIs
 

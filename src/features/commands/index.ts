@@ -1,10 +1,12 @@
 import { Client, Events, MessageFlags, type Interaction } from "discord.js";
+import { createLogger } from "../../lib/logger.js";
 import { liveCommand } from "./live.js";
 import { recentCommand } from "./recent.js";
 import type { CommandContext, SlashCommand } from "./types.js";
 import { watchCommand } from "./watch.js";
 
 const COMMANDS: SlashCommand[] = [liveCommand, watchCommand, recentCommand];
+const log = createLogger("commands");
 
 /**
  * Slash-command registry: bulk-registers the command set on start (overwriting
@@ -48,11 +50,11 @@ export class CommandsFeature {
       // A previous boot without DISCORD_GUILD_ID may have registered globally —
       // clear that scope so the picker doesn't show every command twice.
       await application.commands.set([]);
-      console.log(`[commands] Registered ${definitions.length} command(s) in guild ${guild.name}`);
+      log.info(`Registered ${definitions.length} command(s) in guild ${guild.name}`);
     } else {
       await application.commands.set(definitions);
-      console.log(
-        `[commands] Registered ${definitions.length} global command(s) — Discord may take up to an hour to show them (set DISCORD_GUILD_ID for instant registration)`,
+      log.info(
+        `Registered ${definitions.length} global command(s) — Discord may take up to an hour to show them (set DISCORD_GUILD_ID for instant registration)`,
       );
     }
 
@@ -71,7 +73,7 @@ export class CommandsFeature {
     try {
       await command.execute(interaction, this.#ctx);
     } catch (error) {
-      console.error(`[commands] /${interaction.commandName} failed:`, error);
+      log.error(`/${interaction.commandName} failed`, error);
       const reply = {
         content: "Something went wrong running that command.",
         flags: MessageFlags.Ephemeral,

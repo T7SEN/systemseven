@@ -1,8 +1,10 @@
 import path from "node:path";
 import { readJsonFile, writeJsonAtomic } from "./jsonFile.js";
+import { createLogger } from "./logger.js";
 
 const HISTORY_FILE = path.join(process.cwd(), "data", "history.json");
 const MAX_ENTRIES = 50;
+const log = createLogger("history");
 
 export interface AnnouncementRecord {
   streamId: string;
@@ -62,7 +64,7 @@ export class AnnouncementHistory {
     try {
       await writeJsonAtomic(HISTORY_FILE, { entries: this.#entries });
     } catch (error) {
-      console.error("[history] Failed to save announcement history:", error);
+      log.error("Failed to save announcement history", error);
     }
   }
 }

@@ -56,14 +56,14 @@ A stream id is never announced twice: `data/state.json` (atomic tmp+rename write
 `src/features/announcement.ts` (`buildGoLiveMessage` + `sendGoLiveMessage`) is the only place announcement content exists. The real notifier and `pnpm test-notify` both call it, so tests can never drift from production behavior. Never inline embed-building anywhere else. → `references/coding-patterns.md`
 
 ### 5. Fail-fast config, resilient runtime
-Anything wrong in `.env` throws at startup with an actionable message (`src/config.ts` is the only file that touches `process.env`). Anything transient at runtime — Twitch 500s, network blips, Discord hiccups — is caught, logged with a `[notifier]`-style prefix, and retried on the next cycle; the process never crashes over a transient error. Shutdown drains the in-flight poll (bounded 10s) *before* destroying the client so an announcement is never posted without its dedupe record being saved. → `references/stream-notifier.md`
+Anything wrong in `.env` throws at startup with an actionable message (`src/config.ts` is the only file that touches `process.env`). Anything transient at runtime — Twitch 500s, network blips, Discord hiccups — is caught, logged through the shared subsystem logger (`src/lib/logger.ts`, `[notifier]`-style prefixes), and retried on the next cycle; the process never crashes over a transient error. Shutdown drains the in-flight poll (bounded 10s) *before* destroying the client so an announcement is never posted without its dedupe record being saved. → `references/stream-notifier.md`
 
 ### 6. Minimal Discord surface
 `Guilds` intent only; permissions requested at invite are View Channel, Send Messages, Embed Links (+ Mention Everyone, needed only when the configured mention role isn't itself mentionable). Every `send()` sets `allowedMentions` explicitly. Widening intents or permissions is a design decision for the owner, not an implementation detail. → `references/coding-patterns.md`
 
 ## Code Style / Patterns Summary
 
-TypeScript strict; native `#private` class fields; `interface` for shapes; no classes where a function does the job. Log lines are prefixed `[bot]` / `[notifier]` / `[check]` / `[test]`. Error messages tell the user what to *do*, not just what broke. Comments state constraints the code can't (why the ready-listener order matters, why writes are atomic) — never narrate the next line. Details: `references/code-style.md`; mechanical rules agents must apply: SKILL.md Section 1.
+TypeScript strict; native `#private` class fields; `interface` for shapes; no classes where a function does the job. Logging goes through `createLogger(subsystem)` from `src/lib/logger.ts` (tags like `[bot]` / `[notifier]`); raw console lives only in the CLI scripts. Error messages tell the user what to *do*, not just what broke. Comments state constraints the code can't (why the ready-listener order matters, why writes are atomic) — never narrate the next line. Details: `references/code-style.md`; mechanical rules agents must apply: SKILL.md Section 1.
 
 ## File Map
 
@@ -81,6 +81,7 @@ src/
     twitch.ts              # Helix client: app-token lifecycle, 401 retry, chunked ≤100 lookups
     twitchLogins.ts        # login normalization + validation (shared by config and /watch)
     jsonFile.ts            # readJsonFile / writeJsonAtomic — ALL data/ persistence goes through these
+    logger.ts              # leveled subsystem logger (createLogger) + addLogSink transport hook (Sentry-ready)
     watchlist.ts           # Watchlist: authoritative watched-login set (data/watchlist.json)
     history.ts             # AnnouncementHistory: rolling log, cap 50 (data/history.json, feeds /recent)
   features/

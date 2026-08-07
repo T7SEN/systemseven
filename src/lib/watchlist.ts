@@ -1,9 +1,11 @@
 import { rename } from "node:fs/promises";
 import path from "node:path";
 import { readJsonFile, writeJsonAtomic } from "./jsonFile.js";
+import { createLogger } from "./logger.js";
 import { isValidTwitchLogin, normalizeTwitchLogin } from "./twitchLogins.js";
 
 const WATCHLIST_FILE = path.join(process.cwd(), "data", "watchlist.json");
+const log = createLogger("watchlist");
 
 export interface WatchlistLoadOptions {
   /** Set false for read-only tooling (check, test-notify): never writes the seed file. */
@@ -41,7 +43,7 @@ export class Watchlist {
             .filter(isValidTwitchLogin);
           this.#logins = new Set(clean);
           this.#loadedFromFile = true;
-          console.log(`[watchlist] Loaded ${this.#logins.size} watched login(s) from data/watchlist.json`);
+          log.info(`Loaded ${this.#logins.size} watched login(s) from data/watchlist.json`);
           return;
         }
       }
@@ -50,13 +52,13 @@ export class Watchlist {
     if (result.state !== "missing") {
       // Present but corrupt/malformed — the /watch-managed list is more precious
       // than the stale env seed, so preserve the evidence and refuse to re-seed.
-      console.error(
-        "[watchlist] data/watchlist.json exists but is corrupt or malformed — NOT re-seeding from " +
+      log.error(
+        "data/watchlist.json exists but is corrupt or malformed — NOT re-seeding from " +
           "TWITCH_BROADCASTERS. Backing it up to watchlist.json.bad and starting with an empty list; " +
           "restore or /watch add your channels.",
       );
       await rename(WATCHLIST_FILE, `${WATCHLIST_FILE}.bad`).catch((error: unknown) => {
-        console.error("[watchlist] Could not back up the corrupt file:", error);
+        log.error("Could not back up the corrupt file", error);
       });
       this.#logins = new Set();
       return;
@@ -66,25 +68,25 @@ export class Watchlist {
     this.#logins = new Set(seed);
     if (seed.length === 0) {
       // Don't write an empty file: leaving it absent keeps a later env seed viable.
-      console.warn(
-        "[watchlist] No watchlist file and TWITCH_BROADCASTERS is empty — watching nobody. " +
+      log.warn(
+        "No watchlist file and TWITCH_BROADCASTERS is empty — watching nobody. " +
           "Add channels with /watch add (or set TWITCH_BROADCASTERS and restart).",
       );
       return;
     }
     if (!persistSeed) {
-      console.log("[watchlist] No data/watchlist.json; using TWITCH_BROADCASTERS in memory only");
+      log.info("No data/watchlist.json; using TWITCH_BROADCASTERS in memory only");
       return;
     }
     try {
       await this.#save();
-      console.log(
-        `[watchlist] Seeded ${seed.length} login(s) from TWITCH_BROADCASTERS; ` +
+      log.info(
+        `Seeded ${seed.length} login(s) from TWITCH_BROADCASTERS; ` +
           `data/watchlist.json is now authoritative — manage it with /watch`,
       );
     } catch (error) {
       // In-memory list still works this session; seeding retries next boot.
-      console.error("[watchlist] Failed to write seed file:", error);
+      log.error("Failed to write seed file", error);
     }
   }
 

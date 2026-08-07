@@ -10,6 +10,7 @@ Verbatim mirror of SKILL.md Section 2, for tools that load references without SK
 | A new command router / handler framework | One exists — `src/features/commands/index.ts` (`CommandsFeature`); add to its `COMMANDS` array, don't build a second |
 | `TWITCH_BROADCASTERS` as the live watched-channel source | Seed-only since 2026-08-07 — `data/watchlist.json` is authoritative after first boot; `/watch` manages it at runtime |
 | Hand-rolled `fs` read/write for `data/` files | `src/lib/jsonFile.ts` — `readJsonFile` / `writeJsonAtomic` |
+| Raw `console.*` logging in bot code | `src/lib/logger.ts` — `createLogger(subsystem)`; raw console lives only in `check.ts`/`testNotify.ts` (CLI output) and the logger's own console sink |
 | `jest`, `vitest`, `mocha`, a `tests/` dir | None — verification is `pnpm typecheck` + `pnpm check` + `pnpm test-notify` |
 | `.eslintrc`, `eslint.config`, `.prettierrc` | None — no linter or formatter is configured |
 | GitHub Actions / CI workflows | None — `.github/` does not exist |

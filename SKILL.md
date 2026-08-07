@@ -45,7 +45,8 @@ When unsure, ask the owner one targeted question rather than guessing.
 - The watched-broadcaster list comes from the shared `Watchlist` (`data/watchlist.json`), read fresh each poll and mutated only via its `add`/`remove`. `TWITCH_BROADCASTERS` seeds it on first boot only.
 - Channel sends check `channel.isSendable()` first; failures throw with a message that says what to fix.
 - External identifiers from config (Twitch logins etc.) are normalized and regex-validated at startup — one malformed value must fail fast, not poison every API call at runtime.
-- Transient runtime errors (network, 5xx): catch, log with a bracketed prefix (`[notifier]`), retry next cycle. Config/programmer errors: throw at startup.
+- Transient runtime errors (network, 5xx): catch, log via the subsystem logger, retry next cycle. Config/programmer errors: throw at startup.
+- Bot code logs through `createLogger(subsystem)` from `src/lib/logger.ts` — never raw `console.*` (exceptions: `check.ts` and `testNotify.ts`, whose console output IS their UI). External transports (Sentry) attach via `addLogSink` at startup, never inline in feature code.
 - After code changes run `pnpm typecheck`; after env/setup changes run `pnpm check`.
 - Commands suggested to the owner must be PowerShell-safe (no `&&` chains with env assignments, no `cp`-style flags that don't exist there — `pnpm` scripts are the portable surface).
 
@@ -59,6 +60,7 @@ When unsure, ask the owner one targeted question rather than guessing.
 | A new command router / handler framework | One exists — `src/features/commands/index.ts` (`CommandsFeature`); add to its `COMMANDS` array, don't build a second |
 | `TWITCH_BROADCASTERS` as the live watched-channel source | Seed-only since 2026-08-07 — `data/watchlist.json` is authoritative after first boot; `/watch` manages it at runtime |
 | Hand-rolled `fs` read/write for `data/` files | `src/lib/jsonFile.ts` — `readJsonFile` / `writeJsonAtomic` |
+| Raw `console.*` logging in bot code | `src/lib/logger.ts` — `createLogger(subsystem)`; raw console lives only in `check.ts`/`testNotify.ts` (CLI output) and the logger's own console sink |
 | `jest`, `vitest`, `mocha`, a `tests/` dir | None — verification is `pnpm typecheck` + `pnpm check` + `pnpm test-notify` |
 | `.eslintrc`, `eslint.config`, `.prettierrc` | None — no linter or formatter is configured |
 | GitHub Actions / CI workflows | None — `.github/` does not exist |

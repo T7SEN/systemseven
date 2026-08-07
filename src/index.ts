@@ -3,9 +3,11 @@ import { loadConfig } from "./config.js";
 import { CommandsFeature } from "./features/commands/index.js";
 import { StreamNotifier } from "./features/streamNotifier.js";
 import { AnnouncementHistory } from "./lib/history.js";
+import { createLogger } from "./lib/logger.js";
 import { TwitchClient } from "./lib/twitch.js";
 import { Watchlist } from "./lib/watchlist.js";
 
+const log = createLogger("bot");
 const config = loadConfig();
 
 const client = new Client({
@@ -19,14 +21,14 @@ const notifier = new StreamNotifier(client, config, { twitch, watchlist, history
 const commands = new CommandsFeature(client, { config, twitch, watchlist, history });
 
 client.once(Events.ClientReady, async (readyClient) => {
-  console.log(`[bot] Logged in as ${readyClient.user.tag}`);
+  log.info(`Logged in as ${readyClient.user.tag}`);
   try {
     await watchlist.load(config.broadcasterLogins);
     await history.load();
     await commands.start();
     await notifier.start();
   } catch (error) {
-    console.error("[bot] Startup failed:", error);
+    log.error("Startup failed", error);
     process.exitCode = 1;
     await shutdown();
   }
@@ -37,7 +39,7 @@ let shuttingDown = false;
 async function shutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.log("[bot] Shutting down…");
+  log.info("Shutting down…");
   commands.stop();
   // Drain the notifier before destroying the client: an in-flight announcement
   // needs the Discord connection alive to finish sending and save its state.
@@ -49,7 +51,7 @@ async function shutdown(): Promise<void> {
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 process.on("unhandledRejection", (reason) => {
-  console.error("[bot] Unhandled rejection:", reason);
+  log.error("Unhandled rejection", reason);
 });
 
 await client.login(config.discordToken);
