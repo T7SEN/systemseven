@@ -35,6 +35,7 @@ Do not upgrade any of these as part of feature work — upgrades are their own c
 - **Discord**: discord.js ^14.16 (14.27.0 installed)
 - **Config**: dotenv ^16.4, all env access centralized in `src/config.ts`
 - **Package manager**: pnpm 11.3.0; build scripts gated via `pnpm-workspace.yaml` → `allowBuilds` (esbuild is the only approved one)
+- **Observability**: @sentry/node ^10 (optional — enabled only when `SENTRY_DSN` is set), attached as a logger sink in `src/lib/sentry.ts`; error monitoring only, tracing/profiling deliberately off
 - **Testing/CI**: none — verification is `pnpm typecheck`, `pnpm check` (setup doctor), `pnpm test-notify` (live-fire announcement test)
 
 Common drift traps are inventoried in **SKILL.md Section 2** — the top offenders: `package-lock.json` (removed), `pnpm.onlyBuiltDependencies` in package.json (never worked here — pnpm 11 ignores it), `src/commands/`–`src/events/` folder conventions (never existed), node-fetch (global fetch is used), any test framework or linter config (none exists).
@@ -81,7 +82,9 @@ src/
     twitch.ts              # Helix client: app-token lifecycle, 401 retry, chunked ≤100 lookups
     twitchLogins.ts        # login normalization + validation (shared by config and /watch)
     jsonFile.ts            # readJsonFile / writeJsonAtomic — ALL data/ persistence goes through these
-    logger.ts              # leveled subsystem logger (createLogger) + addLogSink transport hook (Sentry-ready)
+    logger.ts              # leveled subsystem logger (createLogger) + addLogSink transport hook
+    sentry.ts              # the ONLY @sentry/node touchpoint: initSentry (no-op without SENTRY_DSN),
+                           #   log-sink wiring (errors → events, info/warn → breadcrumbs), closeSentry flush
     watchlist.ts           # Watchlist: authoritative watched-login set (data/watchlist.json)
     history.ts             # AnnouncementHistory: rolling log, cap 50 (data/history.json, feeds /recent)
   features/

@@ -97,6 +97,9 @@ without it, registration is global and Discord can take up to an hour.
   (default 15), the new session is not re-announced.
 - If the bot is started for the very first time while a stream is already
   live, that stream **is** announced (there's no prior state to compare to).
+- Optional: set `SENTRY_DSN` in `.env` (from a sentry.io Node project) to get
+  error reports with full log breadcrumbs; leave it empty and the bot runs
+  identically without Sentry.
 
 ## Project layout
 

@@ -129,6 +129,10 @@ try {
   await client.destroy();
 }
 
+console.log("[check] Sentry");
+if (config.sentryDsn) ok("SENTRY_DSN set — errors will be reported to Sentry");
+else info("SENTRY_DSN empty — Sentry disabled (optional)");
+
 if (failed) {
   console.log("\n[check] Problems found — fix the FAIL lines above and re-run `pnpm check`.");
 } else {

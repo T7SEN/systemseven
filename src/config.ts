@@ -6,6 +6,8 @@ export interface Config {
   announceChannelId: string;
   mentionRoleId: string | null;
   guildId: string | null;
+  /** Optional — Sentry stays disabled when null. */
+  sentryDsn: string | null;
   twitchClientId: string;
   twitchClientSecret: string;
   /** Seed only — after first boot, data/watchlist.json is authoritative. */
@@ -59,11 +61,20 @@ export function loadConfig(): Config {
     );
   }
 
+  const sentryDsn = process.env.SENTRY_DSN?.trim() || null;
+  if (sentryDsn && !/^https?:\/\/\S+@\S+/.test(sentryDsn)) {
+    throw new Error(
+      "SENTRY_DSN doesn't look like a Sentry DSN (expected https://<key>@<host>/<project>). " +
+        "Copy it from sentry.io → your project → Settings → Client Keys, or leave it empty.",
+    );
+  }
+
   return {
     discordToken: requireEnv("DISCORD_TOKEN"),
     announceChannelId: requireEnv("ANNOUNCE_CHANNEL_ID"),
     mentionRoleId: process.env.MENTION_ROLE_ID?.trim() || null,
     guildId,
+    sentryDsn,
     twitchClientId: requireEnv("TWITCH_CLIENT_ID"),
     twitchClientSecret: requireEnv("TWITCH_CLIENT_SECRET"),
     broadcasterLogins: [...new Set(broadcasterLogins)],

@@ -4,11 +4,14 @@ import { CommandsFeature } from "./features/commands/index.js";
 import { StreamNotifier } from "./features/streamNotifier.js";
 import { AnnouncementHistory } from "./lib/history.js";
 import { createLogger } from "./lib/logger.js";
+import { closeSentry, initSentry } from "./lib/sentry.js";
 import { TwitchClient } from "./lib/twitch.js";
 import { Watchlist } from "./lib/watchlist.js";
 
 const log = createLogger("bot");
 const config = loadConfig();
+// Before anything else can log an error worth capturing.
+await initSentry(config);
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds],
@@ -45,6 +48,8 @@ async function shutdown(): Promise<void> {
   // needs the Discord connection alive to finish sending and save its state.
   await notifier.stop();
   await client.destroy();
+  // Last: give buffered Sentry events a bounded chance to flush.
+  await closeSentry();
   process.exit();
 }
 

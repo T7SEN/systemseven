@@ -36,21 +36,27 @@ export class CommandsFeature {
     const definitions = COMMANDS.map((command) => command.data.toJSON());
     const application = this.#client.application;
     if (!application) {
-      throw new Error("Client application unavailable — start() must run after ClientReady.");
+      throw new Error(
+        "Client application unavailable — start() must run after ClientReady.",
+      );
     }
 
     const guildId = this.#ctx.config.guildId;
     if (guildId) {
-      const guild = await this.#client.guilds.fetch(guildId).catch((error: unknown) => {
-        throw new Error(
-          `Cannot access guild ${guildId} — is DISCORD_GUILD_ID right and the bot invited? (${error instanceof Error ? error.message : String(error)})`,
-        );
-      });
+      const guild = await this.#client.guilds
+        .fetch(guildId)
+        .catch((error: unknown) => {
+          throw new Error(
+            `Cannot access guild ${guildId} — is DISCORD_GUILD_ID right and the bot invited? (${error instanceof Error ? error.message : String(error)})`,
+          );
+        });
       await guild.commands.set(definitions);
       // A previous boot without DISCORD_GUILD_ID may have registered globally —
       // clear that scope so the picker doesn't show every command twice.
       await application.commands.set([]);
-      log.info(`Registered ${definitions.length} command(s) in guild ${guild.name}`);
+      log.info(
+        `Registered ${definitions.length} command(s) in guild ${guild.name}`,
+      );
     } else {
       await application.commands.set(definitions);
       log.info(

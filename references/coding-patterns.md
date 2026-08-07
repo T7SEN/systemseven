@@ -73,6 +73,8 @@ export class MyFeature {
 
 - `src/lib/logger.ts`: `createLogger(subsystem)` returns a leveled logger (`debug`/`info`/`warn`/`error`); the built-in console sink preserves the `[subsystem] message` format. One logger per module, created at module top.
 - External transports (Sentry etc.) attach via `addLogSink(sink)` at startup — feature code never imports a telemetry SDK directly. Sinks are exception-isolated: a broken sink can't take the bot down.
+- `src/lib/sentry.ts` is the canonical sink: `initSentry(config)` no-ops without `SENTRY_DSN` (SDK not even loaded — dynamic import), otherwise wires logger errors → `captureException`/`captureMessage` and info/warn → breadcrumbs; `closeSentry()` flushes (bounded 2s) during shutdown, after `client.destroy()`.
+- Sentry gotchas encoded there (don't undo): `tracesSampleRate` must stay UNSET — `0` counts as "tracing enabled at 0%" and loads the auto-perf integrations; the default `OnUnhandledRejection` and `Console` integrations are filtered out so the logger sink stays the single reporter/breadcrumber (defaults would pre-empt our enriched captures or duplicate every breadcrumb). `OnUncaughtException` is kept — it captures, flushes, and exits with native-crash parity.
 - Raw `console.*` is reserved for `check.ts`/`testNotify.ts`, whose console output is the product.
 
 ## HTTP / external APIs

@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@sentry/node": "^10.69.0",
     "discord.js": "^14.16.3",
     "dotenv": "^16.4.5"
   },

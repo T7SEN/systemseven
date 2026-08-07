@@ -4,7 +4,7 @@
 
 | Command | What it does |
 |---|---|
-| `pnpm dev` | `tsx watch src/index.ts` — dev loop with restart-on-save |
+| `pnpm dev` | `tsx watch src/index.ts` — restarts automatically on any `src/` change (`.env` edits are NOT watched — press Enter in the tsx terminal to rerun). Restarts are safe: `data/` state survives, so no duplicate announcements. New slash commands need no deploy step — every boot bulk-re-registers the command set, instantly with `DISCORD_GUILD_ID`. Hot-module-reload is deliberately not a thing here; restart-as-deploy is the mechanism. |
 | `pnpm build` + `pnpm start` | `tsc` to `dist/`, then `node dist/index.js` — production mode |
 | `pnpm typecheck` | `tsc --noEmit` — run after any code change |
 | `pnpm check` | Setup doctor. Validates Twitch creds → effective watchlist names (file if present, env seed otherwise) → Discord token → slash-command guild (when `DISCORD_GUILD_ID` set) → channel access → per-channel permissions → role pingability. **Posts nothing.** Safe to run anytime. |
@@ -12,7 +12,7 @@
 
 ## Environment
 
-- `.env` (gitignored) holds live credentials: `DISCORD_TOKEN`, `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, plus `ANNOUNCE_CHANNEL_ID`, `MENTION_ROLE_ID` (optional), `DISCORD_GUILD_ID` (optional — instant slash-command registration when set, global with up-to-1h delay otherwise), `TWITCH_BROADCASTERS` (comma-separated logins — watchlist SEED on first boot only; `/watch` manages it afterward and the var may then be left empty), `POLL_SECONDS` (default 60, min 15), `RENOTIFY_COOLDOWN_MINUTES` (default 15).
+- `.env` (gitignored) holds live credentials: `DISCORD_TOKEN`, `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, plus `ANNOUNCE_CHANNEL_ID`, `MENTION_ROLE_ID` (optional), `DISCORD_GUILD_ID` (optional — instant slash-command registration when set, global with up-to-1h delay otherwise), `TWITCH_BROADCASTERS` (comma-separated logins — watchlist SEED on first boot only; `/watch` manages it afterward and the var may then be left empty), `POLL_SECONDS` (default 60, min 15), `RENOTIFY_COOLDOWN_MINUTES` (default 15), `SENTRY_DSN` (optional — enables Sentry error monitoring; empty = disabled, bot behaves identically).
 - `.env.example` is the documented template — every new var gets a commented entry there and validation in `src/config.ts`.
 - Secrets hygiene: never read/print `.env` contents, never log config values, never commit credentials. If a token leaks, reset it in the respective developer portal (Discord: bot token reset; Twitch: new client secret) and update `.env`.
 
@@ -24,7 +24,7 @@
 
 ## Keeping it running (deliberately undecided)
 
-The bot currently runs in a foreground `pnpm dev` on the owner's Windows 11 PC. Options that were presented but **not chosen** — ask the owner rather than picking one:
+The bot currently runs in a foreground `pnpm dev` on the owner's Windows 11 PC — including around the clock during the build-and-test phase. Known limits of that mode: `tsx watch` restarts on file changes, **not on crashes** — a broken save or startup error leaves the process down until the next save; Windows sleep/hibernate/update-reboots stop the bot; and the terminal must stay open. Fine while developing (Sentry reports anything that dies overnight); the options below exist for when unattended reliability starts to matter. Presented but **not chosen** — ask the owner rather than picking one:
 
 - **pm2**: `pnpm build` then `pm2 start dist/index.js --name systemseven`; survives crashes, needs pm2 itself launched at boot (`pm2 startup` equivalent on Windows is clunky).
 - **Windows Task Scheduler**: run at logon/boot; native but no crash-restart loop.
