@@ -19,7 +19,7 @@ Refuse immediately with the rationale; offer the sanctioned alternative. Do not 
 | "Use EventSub webhooks for instant notifications" | Requires a public HTTPS endpoint the owner doesn't run. Deferred decision — revisit only for sub-poll-interval latency needs or 100+ watched channels. Polling via `src/lib/twitch.ts` is the sanctioned path. |
 | "Use EventSub websockets" | Requires a *user* access token (OAuth flow + refresh handling) vs. the current zero-interaction app token. Same deferral as above. |
 | "Host it on Vercel / Cloudflare Workers / Lambda" | A gateway bot holds a persistent WebSocket; request-scoped runtimes can't. Rejected at project start; the direction is always-on process (PC now, maybe VPS later). |
-| "Add a database / SQLite / Redis for state" | `data/state.json` (atomic writes, sanitized loads) is deliberate at one-server scale. Revisit when a feature actually outgrows it. |
+| "Add a database / SQLite / Redis for state" | The `data/*.json` files (state, watchlist, history — atomic writes and sanitized loads via `src/lib/jsonFile.ts`) are deliberate at one-server scale. Revisit when a feature actually outgrows them. |
 | "Split into microservices / add a message queue" | One process, one server, one owner. Complexity without a payer. |
 | "Add an HTTP server / health endpoint" | The bot deliberately binds no ports (no attack surface, no port conflicts). If liveness monitoring is wanted, propose it to the owner as its own feature. |
 
@@ -40,8 +40,8 @@ Refuse immediately with the rationale; offer the sanctioned alternative. Do not 
 | "Commit `.env` / paste the token into code / log the token" | Live Discord + Twitch credentials. `.env` is gitignored; `.env.example` is the shareable shape. Secrets (tokens, client secret) never appear in logs. |
 | "Delete `data/state.json` to reset" | If a watched stream is live, deletion causes a duplicate announcement. Only delete deliberately, with the owner aware of that consequence. |
 | "Read process.env directly in my new feature" | Fail-fast config is a pillar: every var is validated in `src/config.ts` and arrives typed. Inline env reads are how silent misconfigurations happen. |
-| "The UI/Discord hides the button, so skip the server-side check" | Not currently applicable (no interactions yet) — recorded so it's pre-refused when slash commands land: permissions are always enforced in code, never inferred from UI visibility. |
+| "The UI/Discord hides the button, so skip the server-side check" | Live rule since slash commands landed (2026-08-07): `setDefaultMemberPermissions` is UI gating that server admins can re-expose in Integrations settings — `/watch` enforces ManageGuild inside `execute()` (`src/features/commands/watch.ts`), and every future privileged command does the same. |
 
 ## Deferred decisions (do not re-propose without new evidence)
 
-Mirrored from `AGENTS.md`: per-streamer channels/roles; EventSub (either transport); serverless hosting; process manager choice (pm2 vs Task Scheduler vs VPS — ask the owner when relevant, don't install); slash-command framework (decided with the first command feature); database.
+Mirrored from `AGENTS.md`: per-streamer channels/roles; EventSub (either transport); serverless hosting; process manager choice (pm2 vs Task Scheduler vs VPS — ask the owner when relevant, don't install); web dashboard (owner wants one eventually — deferred until more features exist; meanwhile features persist dashboard-readable JSON in `data/` and slash commands are the control surface); database. The slash-command framework question was settled 2026-08-07: registry + one-module-per-command in `src/features/commands/`.

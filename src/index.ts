@@ -1,6 +1,10 @@
 import { Client, Events, GatewayIntentBits } from "discord.js";
 import { loadConfig } from "./config.js";
+import { CommandsFeature } from "./features/commands/index.js";
 import { StreamNotifier } from "./features/streamNotifier.js";
+import { AnnouncementHistory } from "./lib/history.js";
+import { TwitchClient } from "./lib/twitch.js";
+import { Watchlist } from "./lib/watchlist.js";
 
 const config = loadConfig();
 
@@ -8,14 +12,21 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds],
 });
 
-const notifier = new StreamNotifier(client, config);
+const twitch = new TwitchClient(config.twitchClientId, config.twitchClientSecret);
+const watchlist = new Watchlist();
+const history = new AnnouncementHistory();
+const notifier = new StreamNotifier(client, config, { twitch, watchlist, history });
+const commands = new CommandsFeature(client, { config, twitch, watchlist, history });
 
 client.once(Events.ClientReady, async (readyClient) => {
   console.log(`[bot] Logged in as ${readyClient.user.tag}`);
   try {
+    await watchlist.load(config.broadcasterLogins);
+    await history.load();
+    await commands.start();
     await notifier.start();
   } catch (error) {
-    console.error("[bot] Failed to start stream notifier:", error);
+    console.error("[bot] Startup failed:", error);
     process.exitCode = 1;
     await shutdown();
   }
@@ -27,6 +38,7 @@ async function shutdown(): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log("[bot] Shutting down…");
+  commands.stop();
   // Drain the notifier before destroying the client: an in-flight announcement
   // needs the Discord connection alive to finish sending and save its state.
   await notifier.stop();

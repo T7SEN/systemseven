@@ -6,6 +6,9 @@ All-in-one Discord bot for your server. Current features:
   (with optional role ping) in a channel when a watched streamer goes live.
   Restart-safe: an ongoing stream is never announced twice, and brief stream
   drops don't re-ping the server.
+- **Slash commands** — `/live` (who's streaming right now), `/watch
+  add|remove|list` (manage the watchlist without touching config or
+  restarting; requires Manage Server), `/recent` (last announcements).
 
 ## Requirements
 
@@ -60,10 +63,29 @@ pnpm test-notify   # posts a REAL test announcement (pings the role if configure
 ```
 
 `pnpm test-notify` exercises the exact code path a real go-live announcement
-takes, using your real Twitch profile and a synthetic stream (or the real one
-if you're live). To test the *detection* side end-to-end, temporarily set
-`TWITCH_BROADCASTERS` to any channel that is live right now, run `pnpm dev`,
-and watch the announcement arrive; then set it back.
+takes, using a watched channel's real Twitch profile and a synthetic stream
+(or the real one if they're live). To test the *detection* side end-to-end,
+run `pnpm dev` and use `/watch add channel:<a channel that is live right now>`
+in Discord — the announcement arrives on the next poll — then `/watch remove`
+it. (Editing `TWITCH_BROADCASTERS` doesn't affect an existing setup: it seeds
+the watchlist on the first run only. To re-seed from it, stop the bot and
+delete `data/watchlist.json` first.)
+
+## Commands
+
+| Command | Who | What |
+|---|---|---|
+| `/live` | everyone | Watched streamers live right now (title, game, viewers). Replies only to you. |
+| `/watch add channel:<name>` | Manage Server | Add a Twitch channel (validated against Twitch first). Takes effect next poll — no restart. |
+| `/watch remove channel:<name>` | Manage Server | Stop watching a channel. |
+| `/watch list` | Manage Server | Show the current watchlist. |
+| `/recent count:<1-15>` | everyone | Recent go-live announcements (default 5). |
+
+Set `DISCORD_GUILD_ID` in `.env` so commands appear in your server instantly;
+without it, registration is global and Discord can take up to an hour.
+
+`TWITCH_BROADCASTERS` seeds the watchlist on first run only — after that,
+`data/watchlist.json` is authoritative and `/watch` is how you manage it.
 
 ## Behavior notes
 
@@ -80,10 +102,18 @@ and watch the announcement arrive; then set it back.
 
 ```
 src/
-  index.ts                  # entry point: Discord client + feature startup
+  index.ts                  # entry point: Discord client + feature wiring
   config.ts                 # environment loading and validation
-  lib/twitch.ts             # minimal Twitch Helix API client (app token flow)
-  features/streamNotifier.ts# go-live polling + announcement logic
+  lib/
+    twitch.ts               # minimal Twitch Helix API client (app token flow)
+    twitchLogins.ts         # login normalization + validation
+    jsonFile.ts             # atomic JSON read/write helpers for data/
+    watchlist.ts            # watched-channel list (seeded from env, /watch-managed)
+    history.ts              # rolling announcement history (feeds /recent)
+  features/
+    streamNotifier.ts       # go-live polling + announce-once state machine
+    announcement.ts         # shared announcement embed builder/sender
+    commands/               # slash commands: registry + /live, /watch, /recent
 ```
 
 New features get their own module under `src/features/` and are wired up in

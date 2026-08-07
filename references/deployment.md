@@ -7,12 +7,12 @@
 | `pnpm dev` | `tsx watch src/index.ts` — dev loop with restart-on-save |
 | `pnpm build` + `pnpm start` | `tsc` to `dist/`, then `node dist/index.js` — production mode |
 | `pnpm typecheck` | `tsc --noEmit` — run after any code change |
-| `pnpm check` | Setup doctor. Validates Twitch creds → broadcaster names → Discord token → channel access → per-channel permissions → role pingability. **Posts nothing.** Safe to run anytime. |
+| `pnpm check` | Setup doctor. Validates Twitch creds → effective watchlist names (file if present, env seed otherwise) → Discord token → slash-command guild (when `DISCORD_GUILD_ID` set) → channel access → per-channel permissions → role pingability. **Posts nothing.** Safe to run anytime. |
 | `pnpm test-notify` | Posts a **real announcement** (pings the mention role if configured) through the production code path. Owner-triggered only. |
 
 ## Environment
 
-- `.env` (gitignored) holds live credentials: `DISCORD_TOKEN`, `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, plus `ANNOUNCE_CHANNEL_ID`, `MENTION_ROLE_ID` (optional), `TWITCH_BROADCASTERS` (comma-separated logins), `POLL_SECONDS` (default 60, min 15), `RENOTIFY_COOLDOWN_MINUTES` (default 15).
+- `.env` (gitignored) holds live credentials: `DISCORD_TOKEN`, `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, plus `ANNOUNCE_CHANNEL_ID`, `MENTION_ROLE_ID` (optional), `DISCORD_GUILD_ID` (optional — instant slash-command registration when set, global with up-to-1h delay otherwise), `TWITCH_BROADCASTERS` (comma-separated logins — watchlist SEED on first boot only; `/watch` manages it afterward and the var may then be left empty), `POLL_SECONDS` (default 60, min 15), `RENOTIFY_COOLDOWN_MINUTES` (default 15).
 - `.env.example` is the documented template — every new var gets a commented entry there and validation in `src/config.ts`.
 - Secrets hygiene: never read/print `.env` contents, never log config values, never commit credentials. If a token leaks, reset it in the respective developer portal (Discord: bot token reset; Twitch: new client secret) and update `.env`.
 
@@ -34,7 +34,12 @@ There is no Dockerfile, no pm2 config, no service definition in the repo — tha
 
 ## State file operations
 
-- `data/state.json` is the only runtime artifact. Safe to inspect. Deleting it while the bot is **running** is harmless — state is authoritative in memory after startup and the file is rewritten on the next change. Deleting it while the bot is **stopped** (or migrating hosts without it) while a watched stream is live = one duplicate announcement at next startup.
+Three runtime artifacts live in `data/` (all gitignored, all safe to inspect, all written atomically):
+
+- `data/state.json` — announce-dedupe state. Deleting it while the bot is **running** is harmless — state is authoritative in memory after startup and the file is rewritten on the next change. Deleting it while the bot is **stopped** (or migrating hosts without it) while a watched stream is live = one duplicate announcement at next startup.
+- `data/watchlist.json` — the authoritative watched-channel list. Deleting it (bot stopped) causes a re-seed from `TWITCH_BROADCASTERS` on next boot, losing any `/watch` changes. An empty `logins` array is a valid state (everyone removed), not corruption. A *corrupt* file is never re-seeded over: it's backed up to `watchlist.json.bad` and the bot starts with an empty list until fixed.
+- `data/history.json` — rolling announcement log (cap 50) behind `/recent`. Freely deletable; only cosmetic history is lost.
+- Migrating hosts: copy the whole `data/` directory with the bot stopped.
 
 ## Failure triage
 

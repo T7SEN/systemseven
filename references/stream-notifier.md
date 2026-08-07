@@ -17,7 +17,7 @@ Keyed by lowercase login in `state.broadcasters`. Persisted to `data/state.json`
 1. `stream.type !== "live"` → skip (Helix can return other types).
 2. Same `stream.id` as `lastStreamId` → refresh `lastSeenLiveAt`, save, done. **This refresh is the heart of the cooldown fix** — it keeps the liveness clock current for the entire stream duration.
 3. New `stream.id`, and `now - lastSeenLiveAt < RENOTIFY_COOLDOWN_MINUTES` → treat as a reconnect: record the new id + `lastSeenLiveAt`, do NOT announce. Suppressed sessions also never announce later (their id is recorded).
-4. New `stream.id`, outside cooldown → announce. On success record id + both timestamps. **On failure record nothing** — the next poll (15–60s later) retries the announcement.
+4. New `stream.id`, outside cooldown → announce. On success record id + both timestamps and append a record to `AnnouncementHistory` (best-effort — a failed history write logs and never blocks announcing). **On announce failure record nothing** — the next poll (15–60s later) retries the announcement.
 
 ## Why the cooldown anchors to `lastSeenLiveAt`, not `lastAnnouncedAt`
 
@@ -43,7 +43,8 @@ The pre-commit draft compared against `lastAnnouncedAt`, and review caught the f
 - Poll loop: `setTimeout` chain (`#scheduleNext`), never overlapping; in-flight promise tracked in `#currentPoll`.
 - `start()`: load state → resolve users (non-fatal on failure — embeds degrade gracefully) → initial poll (wrapped, non-fatal) → schedule.
 - `stop()`: sets `#stopped`, clears the timer, drains `#currentPoll` with a 10s `Promise.race` cap.
-- User records (`#users`) are resolved once at startup for display names/avatars; a broadcaster added to config needs a restart to be watched (config is read once at boot — there is no hot reload).
+- The watched list comes from the shared `Watchlist` (`data/watchlist.json`), read fresh at the top of every poll — `/watch add`/`remove` takes effect on the next poll with no restart. `TWITCH_BROADCASTERS` only seeds the file on first boot. An empty watchlist makes `#poll` a no-op.
+- User records (`#users`) are resolved at startup for the initial watchlist, then opportunistically each poll for any live login missing from the cache (covers `/watch`-added channels). Resolution failure is non-fatal — embeds degrade to stream-payload names.
 
 ## Invariants to preserve when editing
 
@@ -53,3 +54,4 @@ The pre-commit draft compared against `lastAnnouncedAt`, and review caught the f
 4. Every live sighting refreshes `lastSeenLiveAt` — except a sighting whose announcement fails, which records nothing (that's invariant 3; the stale timestamp just means a post-failure restart may announce instead of suppress, which is the safe direction).
 5. `#loadState` must accept arbitrary JSON without throwing.
 6. Changing `BroadcasterState`'s shape requires updating the `#loadState` sanitizer in the same change; existing state files must load.
+7. The notifier never mutates the `Watchlist` — `/watch` (and seeding) are the only writers.

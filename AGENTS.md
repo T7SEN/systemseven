@@ -44,10 +44,10 @@ Common drift traps are inventoried in **SKILL.md Section 2** — the top offende
 Do not paraphrase from memory — load the reference when the work touches that pillar.
 
 ### 1. Feature-module pattern
-Every bot capability is a self-contained module (usually a class) under `src/features/`, constructed and started from `src/index.ts` — no plugin framework, no dynamic loading, no `src/commands/` convention. A feature owns its own state, scheduling, and persistence; `index.ts` only wires it to the shared `Client` and `Config`. New features copy the shape of `StreamNotifier` (constructor takes `client, config`; `start()`; async `stop()`). → `references/coding-patterns.md`
+Every bot capability is a self-contained module (usually a class) under `src/features/`, constructed and started from `src/index.ts` — no plugin framework, no dynamic loading, no `src/commands/` convention. A feature owns its own state, scheduling, and persistence; `index.ts` only wires it to the shared `Client`, `Config`, and shared services (`TwitchClient`, `Watchlist`, `AnnouncementHistory`). New features copy the shape of `StreamNotifier` (constructor takes `client, config, deps`; `start()`; async `stop()`). Slash commands are their own feature (`src/features/commands/`): a `CommandsFeature` registry that bulk-registers on ready and routes `InteractionCreate`; each command is one module added to its `COMMANDS` array. → `references/coding-patterns.md`
 
 ### 2. Twitch detection is Helix polling with an app token
-`src/lib/twitch.ts` is a minimal Helix client using the client-credentials flow: lazy token fetch, refresh 60s before expiry, one forced-refresh retry on 401. Detection is `GET /streams` polling (chunked ≤100 logins per request) every `POLL_SECONDS`. There is no user OAuth, no EventSub, no webhook server. Malformed logins make Helix 400 the *entire* request, which is why `config.ts` normalizes (`@name`, `twitch.tv/name` → `name`) and validates (`/^[a-z0-9_]{1,25}$/`) at startup. → `references/twitch-api.md`
+`src/lib/twitch.ts` is a minimal Helix client using the client-credentials flow: lazy token fetch, refresh 60s before expiry, one forced-refresh retry on 401. Detection is `GET /streams` polling (chunked ≤100 logins per request) every `POLL_SECONDS`. There is no user OAuth, no EventSub, no webhook server. Malformed logins make Helix 400 the *entire* request, which is why every login is normalized (`@name`, `twitch.tv/name` → `name`) and validated (`/^[a-z0-9_]{1,25}$/`) via `src/lib/twitchLogins.ts` — at startup for the env seed, and in `/watch add` for runtime additions. The watched list itself lives in `data/watchlist.json` (`Watchlist`), seeded from `TWITCH_BROADCASTERS` on first boot and managed by `/watch` afterward; the notifier reads it fresh every poll. → `references/twitch-api.md`
 
 ### 3. Announce-once state machine
 A stream id is never announced twice: `data/state.json` (atomic tmp+rename writes, sanitized on load) records `lastStreamId`, `lastAnnouncedAt`, and `lastSeenLiveAt` per login. The re-notify cooldown is anchored to `lastSeenLiveAt` — the last poll where the broadcaster was seen live — NOT to the announcement time; anchoring to announcement time was a real bug caught in pre-commit review (a stream crashing 2h in would have re-pinged). A failed announcement leaves `lastStreamId` unset so the next poll retries. → `references/stream-notifier.md`
@@ -69,22 +69,32 @@ TypeScript strict; native `#private` class fields; `interface` for shapes; no cl
 
 ```
 src/
-  index.ts                 # entry: builds Client (Guilds only), wires ClientReady → notifier.start(),
-                           #   re-entry-guarded shutdown on SIGINT/SIGTERM (drain notifier THEN destroy)
-  config.ts                # loadConfig(): the ONLY process.env access; validation + Twitch login
-                           #   normalization; throws actionable errors at startup
-  check.ts                 # `pnpm check` setup doctor: validates Twitch creds, broadcaster names,
-                           #   Discord token, channel access + permissions, role pingability. Posts NOTHING.
+  index.ts                 # entry: builds Client (Guilds only), constructs shared services + features,
+                           #   wires ClientReady startup, re-entry-guarded shutdown (drain notifier THEN destroy)
+  config.ts                # loadConfig(): the ONLY process.env access; throws actionable errors at startup.
+                           #   TWITCH_BROADCASTERS is watchlist SEED only; DISCORD_GUILD_ID → instant commands
+  check.ts                 # `pnpm check` setup doctor: Twitch creds, broadcaster names, Discord token,
+                           #   channel access + permissions, role pingability, guild access. Posts NOTHING.
   testNotify.ts            # `pnpm test-notify`: posts a REAL announcement via the shared path
-                           #   (pings the mention role!). Uses synthetic stream unless actually live.
+                           #   (pings the mention role!). Uses the first watchlist entry.
   lib/
-    twitch.ts              # Helix client: app-token lifecycle, 401 retry, getUsersByLogin /
-                           #   getLiveStreams (chunked ≤100), TwitchUser/TwitchStream types
+    twitch.ts              # Helix client: app-token lifecycle, 401 retry, chunked ≤100 lookups
+    twitchLogins.ts        # login normalization + validation (shared by config and /watch)
+    jsonFile.ts            # readJsonFile / writeJsonAtomic — ALL data/ persistence goes through these
+    watchlist.ts           # Watchlist: authoritative watched-login set (data/watchlist.json)
+    history.ts             # AnnouncementHistory: rolling log, cap 50 (data/history.json, feeds /recent)
   features/
     streamNotifier.ts      # the poll loop + announce-once state machine + data/state.json persistence
     announcement.ts        # buildGoLiveMessage/sendGoLiveMessage — the ONLY announcement content source
-data/state.json            # runtime state (gitignored): per-login lastStreamId/lastAnnouncedAt/lastSeenLiveAt.
-                           #   Deleting it mid-stream causes ONE duplicate announcement.
+    commands/
+      index.ts             # CommandsFeature: bulk registration (guild-scoped if DISCORD_GUILD_ID) + routing
+      types.ts             # SlashCommand + CommandContext interfaces
+      live.ts              # /live — watched streamers live right now (ephemeral)
+      watch.ts             # /watch add|remove|list — ManageGuild enforced SERVER-SIDE in execute()
+      recent.ts            # /recent — recent announcements from history (ephemeral)
+data/                      # gitignored runtime state: state.json (announce dedupe — missing at startup
+                           #   mid-stream = one duplicate), watchlist.json (authoritative watched list),
+                           #   history.json (announcement log)
 pnpm-workspace.yaml        # allowBuilds: esbuild — pnpm 11's build-script approval (NOT package.json "pnpm")
 .env.example               # env template with comments; real .env is gitignored and holds live tokens
 ```
@@ -94,13 +104,19 @@ pnpm-workspace.yaml        # allowBuilds: esbuild — pnpm 11's build-script app
 1. About to run `npm` or `npx` anything? → Refuse; use `pnpm` / `pnpm exec`.
 2. Adding a dependency, linter, test framework, or CI? → Ask the owner first. Tooling choices are theirs (this is standing feedback, learned the hard way with npm-vs-pnpm).
 3. Tempted to propose EventSub, serverless, or a database? → Check Deferred Decisions below; don't re-propose without new evidence.
-4. Building a new feature? → New module in `src/features/`, wired in `index.ts`, config through `config.ts`. Copy `StreamNotifier`'s lifecycle shape.
+4. Building a new feature? → New module in `src/features/`, wired in `index.ts`, config through `config.ts`. Copy `StreamNotifier`'s lifecycle shape. A new slash command is one module in `src/features/commands/` added to the `COMMANDS` array — never a second router.
 5. Touching announcement content? → Edit `src/features/announcement.ts` only; verify with `pnpm test-notify` (warn the owner first — it pings).
 6. Changing `BroadcasterState`? → Update the `#loadState` sanitizer in the same change; existing `data/state.json` files must load cleanly.
 7. About to run a script that posts to Discord? → Tell the owner before running; announcements ping a real role on a real server.
 8. Need a new env var? → Add to `config.ts` (validated, typed) AND `.env.example` (commented). Never `process.env` elsewhere.
 9. Need a privileged intent or wider permission? → Stop; that's an owner decision. Name the feature that requires it.
 10. Unsure whether something exists in this repo? → SKILL.md Section 2 before writing code that references it.
+
+### Standing working agreements (owner-set, 2026-08-07)
+
+1. **Docs are part of the change.** Any change that affects documented behavior, structure, or decisions updates this file, SKILL.md, the affected `references/` files, README, and the owner's session-prompts file in the *same* change — never as a follow-up. Stale docs are treated as defects.
+2. **Verify before reporting.** Every code change — added, modified, or removed — is followed by `pnpm typecheck`; changes touching config, env, or integration surfaces also get `pnpm check`. Work is not "done" until the checks pass.
+3. **Reports end with "How to test."** Whenever a change adds, alters, or removes something the owner can exercise, the final report ends with concrete testing steps.
 
 ### Decisions deliberately deferred
 
@@ -110,8 +126,10 @@ Don't re-propose these without new information; each was considered on 2026-08-0
 - **Twitch EventSub (websocket or webhook)** — polling at 15–60s is fast enough and needs no public endpoint or user OAuth. Revisit if the owner needs sub-poll-interval latency or watches 100+ channels.
 - **Serverless/interactions-only hosting** — incompatible with the gateway-bot direction. Revisit only if the bot's scope shrinks to slash-commands-only.
 - **Process manager (pm2 / Task Scheduler / VPS)** — options presented, owner hasn't chosen. Ask which they want when "keeping it running" comes up; don't install one unprompted.
-- **Slash-command framework** — no commands exist yet; the pattern gets decided when the first command feature lands, not before.
-- **Database** — `data/state.json` is deliberate at this scale.
+- **Web dashboard** — owner wants one eventually (2026-08-07); deliberately deferred until more features exist. Interim rules: every feature persists dashboard-readable JSON in `data/`, and slash commands are the interim control surface. Don't scaffold a web UI or HTTP server without the owner saying "dashboard now".
+- **Database** — the `data/*.json` files are deliberate at this scale.
+
+(The slash-command framework, deferred here until the first command feature, was decided 2026-08-07: registry + one-module-per-command in `src/features/commands/` — see Pillar 1.)
 
 ## References Routing Table
 

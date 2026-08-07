@@ -16,6 +16,7 @@ export interface TwitchStream {
   game_name: string;
   title: string;
   type: string;
+  viewer_count: number;
   started_at: string;
   thumbnail_url: string;
 }

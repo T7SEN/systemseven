@@ -1,19 +1,20 @@
 import "dotenv/config";
+import { isValidTwitchLogin, normalizeTwitchLogin } from "./lib/twitchLogins.js";
 
 export interface Config {
   discordToken: string;
   announceChannelId: string;
   mentionRoleId: string | null;
+  guildId: string | null;
   twitchClientId: string;
   twitchClientSecret: string;
+  /** Seed only — after first boot, data/watchlist.json is authoritative. */
   broadcasterLogins: string[];
   pollSeconds: number;
   renotifyCooldownMinutes: number;
 }
 
-// Twitch logins are letters/numbers/underscores; anything else makes Helix
-// reject the entire streams/users request with a 400, not just skip the value.
-const TWITCH_LOGIN_RE = /^[a-z0-9_]{1,25}$/;
+const SNOWFLAKE_RE = /^\d{17,20}$/;
 
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -34,18 +35,15 @@ function optionalNumber(name: string, fallback: number, min: number): number {
 }
 
 export function loadConfig(): Config {
-  const broadcasterLogins = requireEnv("TWITCH_BROADCASTERS")
+  // Optional: only seeds data/watchlist.json when that file doesn't exist yet.
+  // May be empty once the watchlist is /watch-managed (Watchlist warns when
+  // both the file and the seed are absent).
+  const broadcasterLogins = (process.env.TWITCH_BROADCASTERS ?? "")
     .split(",")
-    .map((raw) => raw.trim().toLowerCase())
-    // Tolerate common paste formats: "@name", "twitch.tv/name", full URLs.
-    .map((login) => login.replace(/^@/, "").replace(/^(?:https?:\/\/)?(?:www\.)?twitch\.tv\//, ""))
+    .map(normalizeTwitchLogin)
     .filter((login) => login.length > 0);
 
-  if (broadcasterLogins.length === 0) {
-    throw new Error("TWITCH_BROADCASTERS must contain at least one Twitch login name.");
-  }
-
-  const invalid = broadcasterLogins.filter((login) => !TWITCH_LOGIN_RE.test(login));
+  const invalid = broadcasterLogins.filter((login) => !isValidTwitchLogin(login));
   if (invalid.length > 0) {
     throw new Error(
       `TWITCH_BROADCASTERS contains invalid Twitch login name(s): ${invalid.join(", ")}. ` +
@@ -54,10 +52,18 @@ export function loadConfig(): Config {
     );
   }
 
+  const guildId = process.env.DISCORD_GUILD_ID?.trim() || null;
+  if (guildId && !SNOWFLAKE_RE.test(guildId)) {
+    throw new Error(
+      `DISCORD_GUILD_ID must be a numeric server ID (right-click your server icon → Copy Server ID), got "${guildId}"`,
+    );
+  }
+
   return {
     discordToken: requireEnv("DISCORD_TOKEN"),
     announceChannelId: requireEnv("ANNOUNCE_CHANNEL_ID"),
     mentionRoleId: process.env.MENTION_ROLE_ID?.trim() || null,
+    guildId,
     twitchClientId: requireEnv("TWITCH_CLIENT_ID"),
     twitchClientSecret: requireEnv("TWITCH_CLIENT_SECRET"),
     broadcasterLogins: [...new Set(broadcasterLogins)],

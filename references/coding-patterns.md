@@ -14,14 +14,21 @@ Mechanical patterns for this repo, with the shipped code as the canonical exampl
 export class MyFeature {
   #client: Client;
   #config: Config;
-  constructor(client: Client, config: Config) { … }
+  constructor(client: Client, config: Config, deps: MyFeatureDeps) { … }
   async start(): Promise<void> { … }   // called from index.ts inside ClientReady
   async stop(): Promise<void> { … }    // called from shutdown BEFORE client.destroy()
 }
 ```
 
-- Features own their state, scheduling, and persistence. `index.ts` only constructs, starts, and stops them.
+- Features own their state, scheduling, and persistence. `index.ts` constructs the shared services (`TwitchClient`, `Watchlist`, `AnnouncementHistory`) once and injects them via a `deps` object — features never construct their own copies.
 - A feature's transient runtime errors never escape to crash the process; its config-shaped errors throw at startup.
+
+## Slash commands (`src/features/commands/`)
+
+- One module per command exporting a `SlashCommand` (`data`: builder chain; `execute(interaction, ctx)`), added to the `COMMANDS` array in `commands/index.ts`. The registry bulk-registers on start (`guild.commands.set` when `DISCORD_GUILD_ID` is set — instant; `application.commands.set` otherwise — up to 1h) and routes `InteractionCreate`. Bulk `set` means removals propagate automatically.
+- Replies are ephemeral by default (`flags: MessageFlags.Ephemeral`); `deferReply` before anything that hits the network (the 3-second interaction window is real).
+- Authorization is enforced server-side inside `execute()` — `setDefaultMemberPermissions` only shapes the UI and server admins can re-expose commands. Canonical example: `src/features/commands/watch.ts` checks `interaction.memberPermissions` for ManageGuild before acting.
+- The registry's catch-all replies with a generic ephemeral error and logs the real one under `[commands]`; command modules don't need their own try/catch for unexpected failures.
 
 ## discord.js specifics
 
@@ -51,8 +58,9 @@ export class MyFeature {
 
 ## Persistence (`data/`)
 
-- Atomic writes: write `file.tmp`, then `rename` over the target. `mkdir` with `recursive: true` first.
-- Loads sanitize field-by-field into a fresh object (see `#loadState`): structural corruption degrades to "start fresh", never to a runtime TypeError. Truthiness checks are not validation.
+- All `data/` JSON goes through `src/lib/jsonFile.ts`: `readJsonFile` (undefined on missing/corrupt) + `writeJsonAtomic` (tmp-file + `rename`, `mkdir recursive` first). Don't hand-roll fs calls.
+- Loads sanitize field-by-field into a fresh object (see `StreamNotifier.#loadState`, `Watchlist.load`, `AnnouncementHistory.load`): structural corruption degrades to "start fresh", never to a runtime TypeError. Truthiness checks are not validation.
+- Failed writes: rolled back in-memory where the caller needs truth (`Watchlist.add`/`remove` revert and throw so `/watch` can report failure); logged-and-swallowed where the data is best-effort (history, notifier state).
 - `data/` is gitignored.
 
 ## Config (`src/config.ts`)
@@ -66,8 +74,9 @@ export class MyFeature {
 - Global `fetch` only (Node 18+). No HTTP client dependencies.
 - API clients follow `src/lib/twitch.ts`: lazy token, refresh-before-expiry margin, one forced-refresh retry on 401, typed response interfaces, batched requests chunked to the API's documented limit (100 for Helix), errors that include status + response body.
 
-## Verification loop
+## Verification loop (owner-mandated, not optional)
 
-- After edits: `pnpm typecheck`.
-- After env/integration changes: `pnpm check` (posts nothing).
+- After ANY code change: `pnpm typecheck`. After config/env/integration changes: also `pnpm check` (posts nothing). A change isn't done until these pass.
 - `pnpm test-notify` only with the owner's knowledge — it pings.
+- Doc sync is part of the same change — see AGENTS.md → Standing working agreements.
+- The final report ends with a "How to test" section whenever the change is something the owner can exercise.

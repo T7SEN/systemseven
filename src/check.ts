@@ -1,6 +1,7 @@
 import { Client, Events, GatewayIntentBits, PermissionFlagsBits } from "discord.js";
 import { loadConfig } from "./config.js";
 import { TwitchClient } from "./lib/twitch.js";
+import { Watchlist } from "./lib/watchlist.js";
 
 /**
  * Setup doctor: validates the whole .env chain — Twitch credentials and
@@ -20,18 +21,34 @@ const config = loadConfig();
 
 console.log("[check] Twitch");
 const twitch = new TwitchClient(config.twitchClientId, config.twitchClientSecret);
+// Validate the EFFECTIVE watchlist (the file when present, env seed otherwise).
+// Read-only load: never creates data/watchlist.json.
+const watchlist = new Watchlist();
+await watchlist.load(config.broadcasterLogins, { persistSeed: false });
+const watchedLogins = watchlist.list();
+info(
+  watchlist.loadedFromFile
+    ? `validating ${watchedLogins.length} login(s) from data/watchlist.json (/watch-managed)`
+    : `validating ${watchedLogins.length} login(s) from TWITCH_BROADCASTERS (no watchlist file yet)`,
+);
 let liveNow: string[] = [];
 try {
-  const users = await twitch.getUsersByLogin(config.broadcasterLogins);
+  // With an empty watchlist, probe a known account so credentials still get validated.
+  const probeLogins = watchedLogins.length > 0 ? watchedLogins : ["twitch"];
+  const users = await twitch.getUsersByLogin(probeLogins);
   ok("client ID + secret are valid");
-  const found = new Set(users.map((user) => user.login.toLowerCase()));
-  for (const login of config.broadcasterLogins) {
-    if (found.has(login)) ok(`broadcaster "${login}" exists on Twitch`);
-    else bad(`broadcaster "${login}" was not found on Twitch — check the spelling`);
+  if (watchedLogins.length === 0) {
+    info("watchlist is empty — the bot will watch nobody until /watch add");
+  } else {
+    const found = new Set(users.map((user) => user.login.toLowerCase()));
+    for (const login of watchedLogins) {
+      if (found.has(login)) ok(`broadcaster "${login}" exists on Twitch`);
+      else bad(`broadcaster "${login}" was not found on Twitch — check the spelling`);
+    }
+    const streams = await twitch.getLiveStreams(watchedLogins);
+    liveNow = streams.map((stream) => stream.user_login);
+    for (const login of liveNow) info(`"${login}" is live right now`);
   }
-  const streams = await twitch.getLiveStreams(config.broadcasterLogins);
-  liveNow = streams.map((stream) => stream.user_login);
-  for (const login of liveNow) info(`"${login}" is live right now`);
 } catch (error) {
   bad(`Twitch API: ${error instanceof Error ? error.message : String(error)}`);
 }
@@ -51,6 +68,14 @@ try {
     ]);
   }
   ok(`bot token is valid — logged in as ${client.user?.tag}`);
+
+  if (config.guildId) {
+    const guild = await client.guilds.fetch(config.guildId).catch(() => null);
+    if (guild) ok(`slash-command guild found: ${guild.name} (instant registration)`);
+    else bad(`cannot access guild ${config.guildId} — is DISCORD_GUILD_ID right and the bot invited?`);
+  } else {
+    info("DISCORD_GUILD_ID not set — slash commands register globally (up to 1h to appear)");
+  }
 
   const channel = await client.channels.fetch(config.announceChannelId).catch((error: unknown) => {
     bad(

@@ -1,6 +1,7 @@
 import { Client, Events, GatewayIntentBits } from "discord.js";
 import { loadConfig } from "./config.js";
 import { TwitchClient, type TwitchStream } from "./lib/twitch.js";
+import { Watchlist } from "./lib/watchlist.js";
 import { sendGoLiveMessage } from "./features/announcement.js";
 
 /**
@@ -17,7 +18,14 @@ import { sendGoLiveMessage } from "./features/announcement.js";
  */
 
 const config = loadConfig();
-const login = config.broadcasterLogins[0];
+const watchlist = new Watchlist();
+// Read-only: never creates or modifies data/watchlist.json.
+await watchlist.load(config.broadcasterLogins, { persistSeed: false });
+const login = watchlist.list()[0];
+if (!login) {
+  console.error("[test] The watchlist is empty — add a channel with /watch add (or set TWITCH_BROADCASTERS and delete data/watchlist.json).");
+  process.exit(1);
+}
 
 const twitch = new TwitchClient(config.twitchClientId, config.twitchClientSecret);
 const [user] = await twitch.getUsersByLogin([login]);

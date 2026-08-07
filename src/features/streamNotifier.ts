@@ -1,8 +1,10 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Client } from "discord.js";
 import type { Config } from "../config.js";
-import { TwitchClient, type TwitchStream, type TwitchUser } from "../lib/twitch.js";
+import type { AnnouncementHistory } from "../lib/history.js";
+import { readJsonFile, writeJsonAtomic } from "../lib/jsonFile.js";
+import type { TwitchClient, TwitchStream, TwitchUser } from "../lib/twitch.js";
+import type { Watchlist } from "../lib/watchlist.js";
 import { sendGoLiveMessage } from "./announcement.js";
 
 const STATE_FILE = path.join(process.cwd(), "data", "state.json");
@@ -20,9 +22,17 @@ interface NotifierState {
   broadcasters: Record<string, BroadcasterState>;
 }
 
+export interface StreamNotifierDeps {
+  twitch: TwitchClient;
+  watchlist: Watchlist;
+  history: AnnouncementHistory;
+}
+
 /**
  * Polls the Twitch Helix API and announces in Discord when a watched
- * broadcaster goes live.
+ * broadcaster goes live. The watched list comes from the shared Watchlist
+ * (read fresh every poll, so /watch changes apply without a restart);
+ * successful announcements are appended to the shared AnnouncementHistory.
  *
  * Re-announce protection is two-layered:
  *  - the same stream id is never announced twice (state survives restarts), and
@@ -33,21 +43,25 @@ export class StreamNotifier {
   #client: Client;
   #config: Config;
   #twitch: TwitchClient;
+  #watchlist: Watchlist;
+  #history: AnnouncementHistory;
   #state: NotifierState = { broadcasters: {} };
   #users = new Map<string, TwitchUser>();
   #timer: NodeJS.Timeout | null = null;
   #currentPoll: Promise<void> | null = null;
   #stopped = false;
 
-  constructor(client: Client, config: Config) {
+  constructor(client: Client, config: Config, deps: StreamNotifierDeps) {
     this.#client = client;
     this.#config = config;
-    this.#twitch = new TwitchClient(config.twitchClientId, config.twitchClientSecret);
+    this.#twitch = deps.twitch;
+    this.#watchlist = deps.watchlist;
+    this.#history = deps.history;
   }
 
   async start(): Promise<void> {
     await this.#loadState();
-    await this.#resolveUsers();
+    await this.#resolveUsers(this.#watchlist.list());
     try {
       await this.#runPoll();
     } catch (error) {
@@ -56,8 +70,9 @@ export class StreamNotifier {
       console.error("[notifier] Initial poll failed (will retry on schedule):", error);
     }
     this.#scheduleNext();
+    const logins = this.#watchlist.list();
     console.log(
-      `[notifier] Watching ${this.#config.broadcasterLogins.join(", ")} every ${this.#config.pollSeconds}s`,
+      `[notifier] Watching ${logins.length > 0 ? logins.join(", ") : "nobody yet (/watch add)"} every ${this.#config.pollSeconds}s`,
     );
   }
 
@@ -96,26 +111,34 @@ export class StreamNotifier {
     }, this.#config.pollSeconds * 1000);
   }
 
-  async #resolveUsers(): Promise<void> {
+  /** Resolve user records for any of the given logins we don't have cached. Non-fatal. */
+  async #resolveUsers(logins: string[]): Promise<void> {
+    const missing = logins.filter((login) => !this.#users.has(login));
+    if (missing.length === 0) return;
     try {
-      const users = await this.#twitch.getUsersByLogin(this.#config.broadcasterLogins);
+      const users = await this.#twitch.getUsersByLogin(missing);
       for (const user of users) {
         this.#users.set(user.login.toLowerCase(), user);
       }
-      const missing = this.#config.broadcasterLogins.filter((login) => !this.#users.has(login));
-      if (missing.length > 0) {
+      const unknown = missing.filter((login) => !this.#users.has(login));
+      if (unknown.length > 0) {
         console.warn(
-          `[notifier] These Twitch logins were not found and will never trigger: ${missing.join(", ")}`,
+          `[notifier] These Twitch logins were not found and will never trigger: ${unknown.join(", ")}`,
         );
       }
     } catch (error) {
-      // Non-fatal: announcements still work without user records, just with less detail.
+      // Announcements still work without user records, just with less detail.
       console.warn("[notifier] Could not resolve Twitch users:", error);
     }
   }
 
   async #poll(): Promise<void> {
-    const streams = await this.#twitch.getLiveStreams(this.#config.broadcasterLogins);
+    const logins = this.#watchlist.list();
+    if (logins.length === 0) return;
+
+    const streams = await this.#twitch.getLiveStreams(logins);
+    // Logins added via /watch since startup won't be in the user cache yet.
+    await this.#resolveUsers(streams.map((stream) => stream.user_login.toLowerCase()));
     let stateChanged = false;
 
     for (const stream of streams) {
@@ -149,6 +172,16 @@ export class StreamNotifier {
           state.lastAnnouncedAt = now;
           state.lastSeenLiveAt = now;
           console.log(`[notifier] Announced ${login} (stream ${stream.id})`);
+          const user = this.#users.get(login);
+          await this.#history.append({
+            streamId: stream.id,
+            login,
+            displayName: user?.display_name ?? stream.user_name,
+            title: stream.title,
+            game: stream.game_name,
+            url: `https://twitch.tv/${stream.user_login}`,
+            announcedAt: now,
+          });
         } catch (error) {
           // Leave lastStreamId untouched so the next poll retries the announcement.
           console.error(`[notifier] Failed to announce ${login}:`, error);
@@ -171,39 +204,31 @@ export class StreamNotifier {
   }
 
   async #loadState(): Promise<void> {
-    try {
-      const raw = await readFile(STATE_FILE, "utf8");
-      const parsed: unknown = JSON.parse(raw);
-      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return;
-      const broadcasters = (parsed as { broadcasters?: unknown }).broadcasters;
-      if (!broadcasters || typeof broadcasters !== "object" || Array.isArray(broadcasters)) return;
+    const result = await readJsonFile(STATE_FILE);
+    if (result.state !== "ok") return;
+    const parsed = result.value;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return;
+    const broadcasters = (parsed as { broadcasters?: unknown }).broadcasters;
+    if (!broadcasters || typeof broadcasters !== "object" || Array.isArray(broadcasters)) return;
 
-      // Copy field-by-field so a hand-edited or corrupt file can only ever
-      // yield a structurally valid state, never a mid-poll TypeError.
-      const clean: Record<string, BroadcasterState> = {};
-      for (const [login, entry] of Object.entries(broadcasters)) {
-        if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
-        const { lastStreamId, lastAnnouncedAt, lastSeenLiveAt } = entry as Record<string, unknown>;
-        const cleanEntry: BroadcasterState = {};
-        if (typeof lastStreamId === "string") cleanEntry.lastStreamId = lastStreamId;
-        if (typeof lastAnnouncedAt === "string") cleanEntry.lastAnnouncedAt = lastAnnouncedAt;
-        if (typeof lastSeenLiveAt === "string") cleanEntry.lastSeenLiveAt = lastSeenLiveAt;
-        clean[login] = cleanEntry;
-      }
-      this.#state = { broadcasters: clean };
-    } catch {
-      // Missing or corrupt state file — start fresh. Worst case is one duplicate announcement.
+    // Copy field-by-field so a hand-edited or corrupt file can only ever
+    // yield a structurally valid state, never a mid-poll TypeError.
+    const clean: Record<string, BroadcasterState> = {};
+    for (const [login, entry] of Object.entries(broadcasters)) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+      const { lastStreamId, lastAnnouncedAt, lastSeenLiveAt } = entry as Record<string, unknown>;
+      const cleanEntry: BroadcasterState = {};
+      if (typeof lastStreamId === "string") cleanEntry.lastStreamId = lastStreamId;
+      if (typeof lastAnnouncedAt === "string") cleanEntry.lastAnnouncedAt = lastAnnouncedAt;
+      if (typeof lastSeenLiveAt === "string") cleanEntry.lastSeenLiveAt = lastSeenLiveAt;
+      clean[login] = cleanEntry;
     }
+    this.#state = { broadcasters: clean };
   }
 
   async #saveState(): Promise<void> {
     try {
-      await mkdir(path.dirname(STATE_FILE), { recursive: true });
-      // Write tmp + rename so a crash mid-write can never leave a truncated
-      // state file (a corrupt file would cost a duplicate announcement).
-      const tmpFile = `${STATE_FILE}.tmp`;
-      await writeFile(tmpFile, JSON.stringify(this.#state, null, 2), "utf8");
-      await rename(tmpFile, STATE_FILE);
+      await writeJsonAtomic(STATE_FILE, this.#state);
     } catch (error) {
       console.error("[notifier] Failed to save state:", error);
     }
